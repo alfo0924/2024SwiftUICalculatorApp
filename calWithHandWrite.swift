@@ -1,6 +1,5 @@
 import SwiftUI
 import Vision
-import VisionKit
 import PencilKit
 
 struct ContentView: View {
@@ -8,9 +7,8 @@ struct ContentView: View {
     @State private var currentOperation: String? = nil
     @State private var firstNumber: Double? = nil
     @State private var newNumber = true
-    @State private var isShowingScanner = false
-    @State private var isShowingDrawing = false
     @State private var canvasView = PKCanvasView()
+    @State private var recognizedText = ""
     
     let buttons: [[String]] = [
         ["AC", "±", "%", "÷"],
@@ -27,27 +25,20 @@ struct ContentView: View {
             Color.black.ignoresSafeArea()
             
             VStack {
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        isShowingScanner = true
-                    }) {
-                        Image(systemName: "pencil.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                    }
-                    Button(action: {
-                        isShowingDrawing = true
-                    }) {
-                        Image(systemName: "pencil.tip")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                    }
+                // 手寫區域
+                CanvasView(canvasView: $canvasView)
+                    .frame(height: 200)
+                    .background(Color.white)
+                    .cornerRadius(10)
                     .padding()
+                
+                Button("辨識") {
+                    recognizeHandwriting()
                 }
+                .foregroundColor(.white)
+                .padding()
                 
-                Spacer()
-                
+                // 計算機顯示區
                 HStack {
                     Spacer()
                     Text(displayText)
@@ -56,6 +47,7 @@ struct ContentView: View {
                         .padding()
                 }
                 
+                // 按鈕區域
                 ForEach(buttons, id: \.self) { row in
                     HStack {
                         ForEach(row, id: \.self) { button in
@@ -76,49 +68,11 @@ struct ContentView: View {
             }
             .padding(.bottom)
         }
-        .sheet(isPresented: $isShowingScanner) {
-            ScannerView(recognizedText: $displayText)
-        }
-        .sheet(isPresented: $isShowingDrawing) {
-            DrawingView(recognizedText: $displayText, isPresented: $isShowingDrawing)
-        }
     }
     
-    // 原有的其他函數保持不變...
-}
-
-struct DrawingView: View {
-    @Binding var recognizedText: String
-    @Binding var isPresented: Bool
-    @State private var canvasView = PKCanvasView()
-    @State private var drawingImage: UIImage?
-    
-    var body: some View {
-        NavigationView {
-            VStack {
-                CanvasView(canvasView: $canvasView)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                HStack {
-                    Button("清除") {
-                        canvasView.drawing = PKDrawing()
-                    }
-                    .padding()
-                    
-                    Button("辨識") {
-                        recognizeDrawing()
-                    }
-                    .padding()
-                }
-            }
-            .navigationBarItems(trailing: Button("完成") {
-                isPresented = false
-            })
-        }
-    }
-    
-    private func recognizeDrawing() {
-        let image = canvasView.drawing.image(from: canvasView.bounds, scale: UIScreen.main.scale)
+    private func recognizeHandwriting() {
+        let drawing = canvasView.drawing
+        let image = drawing.image(from: drawing.bounds, scale: 1.0)
         
         guard let cgImage = image.cgImage else { return }
         
@@ -131,51 +85,34 @@ struct DrawingView: View {
             }
             
             DispatchQueue.main.async {
-                processRecognizedText(recognizedStrings.joined())
+                if let firstString = recognizedStrings.first {
+                    handleRecognizedText(firstString)
+                }
             }
         }
-        
-        request.recognitionLevel = .accurate
-        request.recognitionLanguages = ["en-US", "zh-Hant", "zh-Hans"]
-        request.usesLanguageCorrection = true
         
         try? requestHandler.perform([request])
     }
     
-    private func processRecognizedText(_ text: String) {
-        // 處理數學運算符號
-        var processedText = text
-            .replacingOccurrences(of: "x", with: "×")
-            .replacingOccurrences(of: "X", with: "×")
-            .replacingOccurrences(of: "÷", with: "÷")
-            .replacingOccurrences(of: "/", with: "÷")
-            .replacingOccurrences(of: "+", with: "+")
-            .replacingOccurrences(of: "-", with: "-")
-            .replacingOccurrences(of: "%", with: "%")
+    private func handleRecognizedText(_ text: String) {
+        // 清除畫布
+        canvasView.drawing = PKDrawing()
         
-        // 移除空白字符
-        processedText = processedText.filter { !$0.isWhitespace }
-        
-        // 如果是純數字，直接更新顯示
-        if let _ = Double(processedText) {
-            recognizedText = processedText
-            isPresented = false
-            return
-        }
-        
-        // 處理數學表達式
-        if let result = evaluateExpression(processedText) {
-            recognizedText = String(result)
-            isPresented = false
+        // 處理運算符號
+        if operators.contains(text) || text == "-" || text == "=" {
+            buttonPressed(text)
+        } else if let number = Double(text) {
+            // 處理數字
+            if newNumber {
+                displayText = text
+                newNumber = false
+            } else {
+                displayText = displayText == "0" ? text : displayText + text
+            }
         }
     }
     
-    private func evaluateExpression(_ expression: String) -> Double? {
-        // 這裡可以添加更複雜的數學表達式求值邏輯
-        // 目前僅支援基本運算
-        let expr = NSExpression(format: expression)
-        return expr.expressionValue(with: nil, context: nil) as? Double
-    }
+    // 其他原有方法保持不變...
 }
 
 struct CanvasView: UIViewRepresentable {
